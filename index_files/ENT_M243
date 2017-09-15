@@ -1,0 +1,317 @@
+
+/*
+ @name: ENT_M243 - Countdown Promo
+ * @functional https://confluence.mtvi.com/display/ENT/ENT_M243+-+Countdown+Promo
+ */
+
+$Crabapple.TriforceModule_ent_m243_V1_0_0 = function() {
+};
+
+$Crabapple.extend($Crabapple.TriforceModule, $Crabapple.TriforceModule_ent_m243_V1_0_0, {
+    viewName: '$Crabapple.TriforceView_ent_m243',
+    end_date: null,
+    // each number in the time slot
+    time_slots: [],
+    limits: [9, 9, 2, 3, 5, 9, 5, 9],
+    suffixes: {1: 'd', 3: 'h', 5: 'm', 7: 's'},
+    content_holder: ".ent_m243-module-content",
+    cookie_name: 'ent_m243_content_hash',
+    is_live: false,
+
+    /**
+     * Initializes the module. Renders the view and calls for enhancements.
+     * If view didn't render anything - the forceHide property is being used
+     *
+     */
+    initializeView: function () {
+        var feed = this.feedResponse.result;
+        if (!this.view.render(feed)) {
+            this.forceHide = true;
+            return;
+        }
+        else {
+            $("#ENT_M243").prependTo($("#content_holder"));
+        }
+    },
+
+    addEvents: function () {
+        var controller = this;
+        // don't add any events if the module is hidden
+        var isActive = this.isCountdownActive();
+        if(isActive) {
+            this.setEndDate();
+            if(this.isCountdownComplete(this)) {
+                this.countdownComplete(); // show the post-state
+            }
+            else {
+                this.startCountdownTimer(); // show the "countdown" state
+            }
+
+            $('.ent_m243-close').click(function(event) {
+                controller.hideModule(controller);
+            });
+
+            controller.addModuleReporting();
+        }
+    },
+
+    addModuleReporting: function(){
+        this.delegateEvent('click', 'a.ent_m243-link', this.reportClickThrough);
+        this.delegateEvent('click', '.ent_m243-close', this.reportCloseClickThrough);
+    },
+
+    reportClickThrough: function(e){
+        var $elm = $(e.currentTarget),
+            destination = ( $elm.closest('a').attr('href') ? $elm.closest('a').attr('href') : 'No Destination'),
+            elmRole = 'ent_m243',
+            moduleAction;
+
+        if(this.is_live){
+            moduleAction = 'clicks on live event call-to-action';
+        }
+        else {
+            moduleAction = 'clicks on promo';
+        }
+
+        try {
+            $Crabapple.repo.trackModuleClickThrough(elmRole, destination, moduleAction);
+        } catch (err) {
+            window.Triforce.getMediator().trigger('triforce:message', {
+                'type': 'error',
+                'message': 'Module reporting for ' + elmRole + ' return error: ' + err
+            });
+        }
+    },
+
+    reportCloseClickThrough: function(e){
+        var destination = $(location).href,
+            elmRole = 'ent_m243',
+            moduleAction = 'clicks on X button';
+
+        try {
+            $Crabapple.repo.trackModuleClickThrough(elmRole, destination, moduleAction);
+        } catch (err) {
+            window.Triforce.getMediator().trigger('triforce:message', {
+                'type': 'error',
+                'message': 'Module reporting for ' + elmRole + ' return error: ' + err
+            });
+        }
+    },
+
+    isCountdownActive: function () {
+        var controller = this;
+        if(controller.moduleElement.find(".ent_m243-time").length && controller.moduleElement.find(".ent_m243-time").data("end-timestamp")) {
+            var end_timestamp = controller.moduleElement.find(".ent_m243-time").data("end-timestamp");
+            var old_hash = $.cookie(controller.cookie_name+end_timestamp);
+            if(old_hash) {
+                var new_hash = controller.getContentHash();
+                if(old_hash != new_hash) { // we bust the cookie if any of the text has been updated.
+                    controller.removeCountdownCookie();
+                    return true;
+                }
+                return false;
+            }
+            return true;
+        }
+        return false;
+    },
+
+    createCountdownCookie: function () {
+        var hash = this.getContentHash();
+        var end_timestamp = this.moduleElement.find(".ent_m243-time").data("end-timestamp");
+        $.cookie(this.cookie_name+end_timestamp, hash, {expires : 1,  path: '/'});
+    },
+
+    getContentHash: function () {
+        // hash is a combination of both the pre and post-states
+        var s = this.moduleElement.find(".ent_m243-headline-countdown").html() + this.moduleElement.find("ent_m243-headline-live").html();
+        var hash = 0, i, chr;
+        if (s.length === 0) return hash;
+        for (i = 0; i < s.length; i++) {
+            chr   = s.charCodeAt(i);
+            hash  = ((hash << 5) - hash) + chr;
+            hash |= 0;
+        }
+        return hash;
+    },
+
+    removeCountdownCookie: function () {
+        $.removeCookie(this.cookie_name);
+    },
+
+    hideModule: function (scope) {
+        if (typeof($.cookie) != "undefined") {
+            scope.createCountdownCookie();
+        }
+        $(scope.content_holder).addClass('closed');
+    },
+
+    // initializing the timer, including the countdown timer
+    startCountdownTimer: function () {
+        var controller = this;
+
+        controller.recalibrateTimer();
+        controller.countdownDigitRender();
+
+        controller.moduleElement.find(".ent_m243-headline .ent_m243-headline-live").removeClass("active");
+        controller.moduleElement.find(".ent_m243-headline .ent_m243-headline-countdown").addClass("active");
+
+        setInterval(function() { // passing the controller makes for much easier scope handling
+            controller.countdownTickFunction(controller);
+        }, 1000);
+
+        $(controller.content_holder).removeClass("closed");
+    },
+
+    // this handles the dom-manipulation for number switching, animation and setting up the next number
+    animateCountdownSection: function(controller, index, target) {
+        var height = $(target).height();
+        controller.moduleElement.find(target).find('.timer-section').addClass('transition');
+        controller.moduleElement.find(target).find('.timer-section').css('top', -height);
+
+        setTimeout(function() {
+            controller.moduleElement.find(target).find('.timer-section').removeClass('transition');
+            var cur = controller.time_slots[index];
+            controller.moduleElement.find(target).find('.cur').html(cur.toString());
+            var next = (cur == 0) ? controller.limits[index] : --cur;
+            controller.moduleElement.find(target).find('.next').html(next.toString());
+            controller.moduleElement.find(target).find('.timer-section').css('top', '0px');
+        }, 400);
+    },
+
+    // handles the primary timer
+    countdownTickFunction: function(controller) {
+        var distance = controller.getTimeUntilEnd();
+        var prev_time_slots = controller.time_slots;
+
+        controller.recalibrateTimer(controller);
+
+        if (distance <= 0) { // current time is now larger than end time
+            controller.countdownComplete();
+        }
+        else {
+            for (var i = (controller.time_slots.length - 1); i >= 0; i--) {
+                if (prev_time_slots[i] != controller.time_slots[i]) {
+                    controller.animateCountdownSection(controller, i, "#timer-section-container-" + i);
+                }
+            }
+        }
+    },
+
+    // dynamically builds out the html for the timer
+    countdownDigitRender: function () {
+        var controller = this;
+        // just to make it simpler
+        var time_slots = controller.time_slots;
+        var limits = controller.limits;
+        var suffixes = controller.suffixes;
+
+        // clear out anything in there
+        controller.moduleElement.find(".ent_m243-time").html("");
+
+        for(var i = 0; i < time_slots.length; i++) {
+            var next_num = ((time_slots[i] - 1) < 0) ? limits[i] : (time_slots[i] - 1);
+            var render = '<div class="timer-section-container" id="timer-section-container-'+i+'">';
+            render += '<ul class="timer-section">';
+            render += '<li class="cur">'+time_slots[i]+'</li><li class="next">'+next_num+'</li>';
+            render += '</ul>';
+            render += '</div>';
+
+            if(suffixes[i]) {
+                render += '<div class="timer-suffix">'+suffixes[i]+'</div>';
+            }
+            controller.moduleElement.find(".ent_m243-time").append(render);
+        }
+    },
+
+    // realigns the timer, prevents the time from drifting too far
+    recalibrateTimer: function(scope) {
+        var controller = (scope) ? scope : this;
+
+        var distance = controller.getTimeUntilEnd();
+
+        var _second = 1000;
+        var _minute = _second * 60;
+        var _hour = _minute * 60;
+        var _day = _hour * 24;
+
+        var days = Math.floor(distance / _day);
+        var hours = Math.floor((distance % _day) / _hour);
+        var minutes = Math.floor((distance % _hour) / _minute);
+        var seconds = Math.floor((distance % _minute) / _second);
+
+        days =  controller.formatNumber(days);
+        hours = controller.formatNumber(hours);
+        minutes = controller.formatNumber(minutes);
+        seconds = controller.formatNumber(seconds);
+
+        var temp_time_slots = [];
+        temp_time_slots = temp_time_slots.concat(days);
+        temp_time_slots = temp_time_slots.concat(hours);
+        temp_time_slots = temp_time_slots.concat(minutes);
+        temp_time_slots = temp_time_slots.concat(seconds);
+
+        controller.time_slots = temp_time_slots;
+    },
+
+    // 0-formatting the numbers is important due to how time_slots works
+    formatNumber: function(num) {
+        var pad = function(str, max) {
+            str = str.toString();
+            return str.length < max ? pad("0" + str, max) : str;
+        };
+
+        return pad(num, 2).split('');
+    },
+
+    isCountdownComplete: function(scope) {
+        scope.recalibrateTimer();
+
+        return (scope.getTimeUntilEnd() <= 0);
+    },
+
+    setEndDate: function() {
+        var end_date_str = this.moduleElement.find(".ent_m243-time").data("end-timestamp");
+        this.end_date = new Date(end_date_str*1000); // convert unix timestamp seconds -> milliseconds
+    },
+
+    // number of milliseconds until the end
+    getTimeUntilEnd: function() {
+        var now = new Date();
+        var distance = this.end_date - now;
+        return distance;
+    },
+
+    // show the post-state
+    countdownComplete: function() {
+        clearInterval(this.countdownTickFunction);
+        this.moduleElement.find(".ent_m243-headline .ent_m243-headline-countdown").removeClass("active");
+        this.moduleElement.find(".ent_m243-headline .ent_m243-headline-live").addClass("active");
+        this.moduleElement.find(".ent_m243-time").hide();
+        this.moduleElement.find(this.content_holder).removeClass("closed");
+        this.is_live = true;
+    }
+});
+/*
+ @name: ENT_M243 - Countdown Promo
+ * @functional https://confluence.mtvi.com/display/ENT/ENT_M243+-+Countdown+Promo
+ */
+
+$Crabapple.TriforceView_ent_m243 = {
+    'parentView': '$Crabapple.TriforceMustacheView',
+    'extention': {
+        /**
+         * Template that's used to render the module on the page
+         *
+         * @var string
+         */
+        templateName: 'Modules/ENT_M243/V1_0_0/Controller/default'
+    }
+};
+(function (name) {
+this.$Crabapple = this.$Crabapple || {};
+this.$Crabapple.TriforceTemplates = this.$Crabapple.TriforceTemplates || {};
+this.$Crabapple.TriforceTemplates[name] = this.$Crabapple.TriforceTemplates[name] || new Hogan.Template(
+{code: function (c,p,i) { var t=this;t.b(i=i||"");if(t.s(t.f("data",c,p,1),c,p,0,9,1192,"{{ }}")){t.rs(c,p,function(c,p,t){t.b("<style>");if(t.s(t.f("text_color",c,p,1),c,p,0,31,358,"{{ }}")){t.rs(c,p,function(c,p,t){t.b(".ent_m243-link .ent_m243-time,.ent_m243-link:hover .ent_m243-time,.ent_m243-link:hover,.ent_m243-link .ent_m243-headline-live-button,.ent_m243-link:hover .ent_m243-headline-live-button{color: ");t.b(t.v(t.f("text_color",c,p,0)));t.b(";}.ent_m243-link:hover .ent_m243-headline-live-button,.ent_m243-link:hover .ent_m243-time {border-color: ");t.b(t.v(t.f("text_color",c,p,0)));t.b(";}");});c.pop();}if(t.s(t.f("hover_color",c,p,1),c,p,0,389,486,"{{ }}")){t.rs(c,p,function(c,p,t){t.b(".ent_m243-time,.ent_m243-link:hover,.ent_m243-headline-live-button {background: ");t.b(t.v(t.f("hover_color",c,p,0)));t.b(";}");});c.pop();}t.b("</style><div class=\"ent_m243-module-content closed\">");if(t.s(t.f("url",c,p,1),c,p,0,562,616,"{{ }}")){t.rs(c,p,function(c,p,t){t.b("<a href=\"");t.b(t.v(t.d(".",c,p,0)));t.b("\" class=\"ent_m243-link\" target=\"_blank\">");});c.pop();}t.b("<div class=\"ent_m243-header\"><h1 class=\"ent_m243-headline\"><span class=\"ent_m243-headline-countdown\">");if(t.s(t.f("headline",c,p,1),c,p,0,738,743,"{{ }}")){t.rs(c,p,function(c,p,t){t.b(t.v(t.d(".",c,p,0)));});c.pop();}t.b("</span><span class=\"ent_m243-headline-live\">");if(t.s(t.f("urlText",c,p,1),c,p,0,812,897,"{{ }}")){t.rs(c,p,function(c,p,t){t.b("<span class=\"ent_m243-headline-live-button\" data-live-url=\"");t.b(t.v(t.f("live_url",c,p,0)));t.b("\">");t.b(t.v(t.d(".",c,p,0)));t.b("</span>");});c.pop();}if(t.s(t.f("subheadline",c,p,1),c,p,0,925,979,"{{ }}")){t.rs(c,p,function(c,p,t){t.b("<span class=\"ent_m243-headline-live-text\">");t.b(t.v(t.d(".",c,p,0)));t.b("</span>");});c.pop();}t.b("</span><span class=\"ent_m243-time\" data-end-timestamp=\"");t.b(t.v(t.f("end_timestamp",c,p,0)));t.b("\" data-timezone-offset=\"");t.b(t.v(t.f("timezone_offset",c,p,0)));t.b("\"></span></h1></div>");if(t.s(t.f("url",c,p,1),c,p,0,1138,1142,"{{ }}")){t.rs(c,p,function(c,p,t){t.b("</a>");});c.pop();}t.b("<span class=\"ent_m243-close\"></span></div>");});c.pop();}return t.fl(); },partials: {}, subs: {  }}
+);
+}).call(this, "Modules/ENT_M243/V1_0_0/Controller/default");

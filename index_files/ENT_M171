@@ -1,0 +1,1354 @@
+
+/*
+ @name: ENT_M171 - Global Search
+ @functional: https://confluence.mtvi.com/display/ENT/ENT_M171+-+Global+Search
+ @styleguide: http://confluence.mtvi.com/display/ENT/Javascript+Style+Guide
+ @author: $Author: msawant $
+ */
+
+$Crabapple.TriforceModule_ent_m171_V2_0_2 = function() {
+};
+
+$Crabapple.extend($Crabapple.TriforceModule, $Crabapple.TriforceModule_ent_m171_V2_0_2, {
+	viewName: '$Crabapple.TriforceView_ent_m171_V2_0_2',
+	body : $('body'),
+	pageContents: $('body'),
+	searchFeedURL: null,
+	searchFeedParams: '&wt=json&fl=seasonNumber_s,episodeNumber_s,url_s,%20imageUrl_s,imageHeight_i,imageWidth_i,imageRatio_f,duration_s,parentTitle_t,title_t,contentType_s,episodeTitle_t,bucketName_s,labelName_s,contentDate_dt,isTveAuthRequiredForDesktop_b,isTveAuthRequiredForMobile_b&defType=edismax',
+	facetedResultsParams: '&facet=on&facet.field=bucketName_s&facet.mincount=1',
+	maxCount: 80,
+	pageNumber: 0,
+	rowsPerPage: 16,
+	currentItemNum: 0,
+	itemsRenderedCount: 0,
+	totalResults: null,
+	searchStartTime: null,
+	filterTerm: null,
+	callbackPrefix: 'searchModuleCallback',
+	arrCallbackSuffix: [{
+		'idx':1,
+		'available': true
+	}],
+	ajaxRequestTimer: 0,
+	ajaxRequestDelay: 200,
+	requestNumber: 0,
+	trendingSelection: '.s_trending_snapHeader',
+	moduleName: 'ent_m171',
+	isMobile: false,
+	alphanumericAndSymbols: /[^a-zA-Z0-9!@#\$%\^\&*\)\(\s+=._-]+$/g,
+	tabsFilter: false,
+	searchSeries: false,
+	searchSeriesFeedParams:null,
+
+	/**
+	 * Initializes the module. Renders the view and calls for enhancements.
+	 * If view didn't render anything - the forceHide property is being used
+	 *
+	 */
+		initializeView: function () {
+		this.feed = this.feedResponse.result;
+
+		if (this.feed && this.feed.showId && this.feed.seriesTrendingResults && this.feed.seriesTrendingResults.length) {
+			this.searchSeriesFeedParams = this.searchFeedParams + '&fq=parentId_s_mv:' + this.feed.showId;
+			this.searchSeries = true;
+
+		}
+		this.view.generateCoreElement();
+		this.view.render(this.feed);
+		this.view.generateColumns();
+		this.moduleElement = this.view.setOutput();
+		this.postRender();
+	},
+
+
+	/**
+	 * Enhances the module that's been rendered server side
+	 *
+	 */
+	enhanceModule: function () {
+		this.view.coreElement = this.moduleElement;
+		this.addEvents();
+		this.addLinkHandler();
+		this.postRender();
+	},
+
+	addEvents:function(){
+
+		var _this = this;
+
+		$(".s_layouts_this_show").on('click', function (event) {
+
+			event.preventDefault();
+
+			if (_this.feed.showId) {
+				_this.searchSeriesFeedParams = _this.searchFeedParams + '&fq=parentId_s_mv:' + _this.feed.showId;
+				_this.searchSeries = true;
+			}
+
+			_this.fadeOutResults();
+			_this.resultsClearOut();
+
+			_this.playLoadingAnim('loadingFirstPage');
+
+
+			if (_this.view.snapInput.val().trim().length && (_this.view.snapInput.val() !==_this.view.data.placeHolderText)) {
+				_this.delayProcessSearch(false);
+			} else {
+				clearTimeout(_this.ajaxRequestTimer);
+				_this.ajaxRequestTimer = setTimeout(function () {
+					_this.initTrendingView();
+				}, _this.ajaxRequestDelay);
+			}
+
+
+			//Highlighting
+
+			_this.moduleElement.find('.s_layouts_this_show').addClass('highlight');
+			if(_this.moduleElement.find('.s_layouts_whole_site').has('highlight')){
+				_this.moduleElement.find('.s_layouts_whole_site').removeClass('highlight');
+			}
+
+
+			_this.moduleActionTracking(_this, 'click on This Show','');
+		});
+
+		$(".s_layouts_whole_site").on('click', function (event) {
+
+			event.preventDefault();
+
+			_this.searchSeries = false;
+
+			//This are the main steps to display the results
+			_this.fadeOutResults();
+			_this.resultsClearOut();
+
+			_this.playLoadingAnim('loadingFirstPage');
+			if (_this.view.snapInput.val().trim().length  && (_this.view.snapInput.val() !==_this.view.data.placeHolderText)) {
+				_this.delayProcessSearch(false);
+			} else {
+				clearTimeout(_this.ajaxRequestTimer);
+				_this.ajaxRequestTimer = setTimeout(function () {
+					_this.initTrendingView();
+				}, _this.ajaxRequestDelay);
+			}
+
+			//Highlighting
+
+			_this.moduleElement.find('.s_layouts_whole_site').addClass('highlight');
+			if(_this.moduleElement.find('.s_layouts_this_show').has('highlight')){
+				_this.moduleElement.find('.s_layouts_this_show').removeClass('highlight');
+			}
+
+			_this.moduleActionTracking(_this, 'click on Whole Site','');
+
+		});
+	},
+
+
+	/**
+	 * Does post render duties, initializes components and stuff.
+	 *
+	 */
+	postRender : function () {
+		this.initShowOverlayButton();
+		this.initScrollSetFocus();
+		this.initScrollTriggerBroker();
+		this.initKeyEvent();
+		this.initKeyControls();
+		this.isMobile = window.Triforce.getMediator().isMobile();
+
+		if (this.isMobile) {
+			this.moduleElement.find('.s_layouts_snapWrapper').addClass('is_mobile_device');
+		}
+
+		if (typeof (config.getSearchFeedURL) == 'function') this.searchFeedURL = config.getSearchFeedURL();
+	},
+
+	logger: function(msg){
+	//	console.debug(this.moduleName+": "+msg);
+	},
+
+	fireTrackingOverlayOpen: function(_this){
+		_this.logger('fireTrackingOverlayOpen called');
+		// set start time for reporting
+		_this.searchStartTime = new Date();
+
+		//header module name being used as the module name for reporting instead of the search module name as this is for when the header opens the search overlay
+		_this.moduleActionTracking(_this, 'open overlay', 'event8');
+	},
+
+	fireTrackingOverlayClose: function(_this){
+		_this.logger('fireTrackingOverlayClose called');
+		var events = 'event9';
+		if(!!_this.moduleElement.find('.s_layouts_snapInput').val()){
+			events += ',event36'; // if there was a search
+			if (!_this.totalResults){ // adding event37 if there was no search results present
+				events += ',event37'; // failed search
+			}
+		}
+		if (_this.totalResults){ // adding event38 if there was search results present
+			events += ',event38';
+		}
+		_this.moduleActionTracking(_this, 'search close button', events);
+	},
+
+	fireTrackingTabs: function(_this, tabName){
+		_this.logger('fireTrackingTabs called');
+
+		if(typeof(tabName) == 'undefined' || null === tabName){
+			return;
+		}
+
+		$Crabapple.repo.trackModuleClickThrough(_this.moduleName, 'tab_'+tabName.toLowerCase(), 'click on '+tabName.toLowerCase());
+	},
+	getHeaderModuleName: function() {
+		var moduleName = 'unknown header';
+		if (typeof triforceManifestFeed !== 'undefined' && triforceManifestFeed && triforceManifestFeed.zones && triforceManifestFeed.zones.header) {
+			moduleName = triforceManifestFeed.zones.header.moduleName.split('_').splice(0, 2).join('_').toLowerCase();
+		}
+		return moduleName;
+	},
+
+	moduleClickTracking: function(_this, elem){
+		_this.logger('moduleClickTracking called');
+		var repoValues = _this.getSearchTrackingValues(_this);
+		var contentType = $(elem).attr('data-content-type');
+		var itemIndex = $(elem).find('.testing_order').text();
+		var destinationURL = $(elem).attr('href');
+
+		//check for is this trending or search items
+		var isTrendingItem = _this.moduleElement.find(_this.trendingSelection).length > 0;
+
+		var tagName = _this.moduleElement.find('.s_layouts_snapTab.active').attr('data-filter');
+
+		var selectionSearch ="";
+
+		if(_this.moduleElement.find('.s_layouts_this_show.highlight').length > 0){
+			selectionSearch = " through This Show";
+		}else if(_this.moduleElement.find('.s_layouts_whole_site.highlight').length > 0){
+			selectionSearch = " through Whole Site";
+		}
+
+		var actionName = (isTrendingItem?'trending item click'+selectionSearch:'search item click'+selectionSearch);
+
+		if(itemIndex) {
+			itemIndexNum = (new Number(itemIndex))+1;
+			repoValues.prop39 = ""+itemIndexNum;
+		}
+
+		//add in the events
+		var events = [];
+		if(repoValues.eVar2) {
+			events.push('event36'); //search occurred
+
+			if(isTrendingItem){
+				events.push('event35'); //Site Search Result Conversion
+				if(!!_this.moduleElement.find('.s_layouts_snapInput').val()) { //  had entered search term
+					events.push('event37'); //Failed search, because trending item showed
+				}
+			}else{
+				events.push('event35'); //Site Search Result Conversion
+				events.push('event38'); //successful search event
+			}
+
+			repoValues.events = events.join();
+
+			if(!tagName){
+				tagName = 'none';
+			}
+
+			if (isTrendingItem) {
+				repoValues.eVar3 = 'trending item';
+				repoValues.eVar16 = 'Trending Item Click';
+			} else {
+				repoValues.eVar3 = tagName;
+				if(typeof contentType != 'undefined' && contentType){
+					repoValues.eVar3 += '|'+contentType;
+				}else{
+					repoValues.eVar3 += '|none';
+				}
+			}
+		}
+
+
+		if(typeof destinationURL != 'undefined' && destinationURL){
+			if(destinationURL.substr(0,1) == '/') {
+				destinationURL = window.location.protocol + "//" + window.location.host + destinationURL;
+			}
+			repoValues.eVar5=destinationURL;
+			repoValues.prop27=destinationURL;
+		}
+
+		repoValues.linkName = _this.getHeaderModuleName();
+
+		$Crabapple.repo.trackModuleClickThrough(_this.moduleName, $(elem).attr('href'), actionName, repoValues);
+	},
+
+	moduleActionTracking: function(_this, actionName, eventName){
+		_this.logger('moduleActionTracking['+actionName+'] called');
+		var repoValues = _this.getSearchTrackingValues(_this);
+		if(actionName === "open overlay"){
+			repoValues.eVar2 = null;
+		}
+		if(typeof actionName != 'undefined'){
+			repoValues.eVar16 = actionName;
+		}
+		if(typeof eventName != 'undefined'){
+			repoValues.events = eventName;
+		}
+
+		repoValues.linkName = _this.getHeaderModuleName();
+
+		$Crabapple.repo.trackModuleAction(_this.moduleName, actionName, repoValues);
+	},
+
+	/**
+	 * Builds the generic search tracking values
+	 */
+	getSearchTrackingValues: function(_this){
+		var searchTerm = _this.moduleElement.find('.s_layouts_snapInput').val();
+		var totalTimeSpent = null;
+
+		if(_this.searchStartTime){ //in seconds
+			totalTimeSpent = Math.floor(((new Date()).getTime()-_this.searchStartTime.getTime())/1000);
+		}
+		var totalSearchResults = _this.totalResults;
+
+		var repoValues = {};
+
+		if(searchTerm){
+			repoValues.eVar2 = searchTerm;
+		}else{
+			repoValues.eVar2 = 'no search term';
+		}
+
+		if(totalSearchResults){
+			repoValues.prop23 = ""+totalSearchResults;
+		}
+
+		if(totalTimeSpent){
+			repoValues.prop32 = ""+totalTimeSpent;
+		}
+
+		return repoValues;
+	},
+
+	/**
+	 * Find the video players on page and pause/unpause them.
+	 *
+	 */
+	pauseVideoPlayers: function(pause) {
+		var _players = [],
+			cssSearchPaused = 'search-paused';
+
+		if (typeof EdgePlayer != 'undefined' && EdgePlayer){
+			_players = EdgePlayer.getPlayers();
+
+		} else if (typeof PJS != 'undefined' && PJS) {
+			_players = PJS.getPlayers();
+		}
+		if ( _players.length > 0 ) {
+			for (var i=0; i < _players.length; i++){
+				if (pause) { // pause players
+					_players[i].pause();
+					_players[i].$el.addClass(cssSearchPaused);
+				} else if (_players[i].$el.hasClass(cssSearchPaused)) {
+					_players[i].$el.removeClass(cssSearchPaused);
+				}
+			}
+		}
+	},
+
+	closeOverlay: function() {
+		var _this = this;
+		if (_this.view.snapWrapper.hasClass('open')) {
+			_this.fireTrackingOverlayClose(_this);
+			_this.view.snapWrapper
+				.removeClass('open')
+				.addClass('fadeOut');
+			_this.pageContents.removeClass('search-open');
+			_this.fadeOutResults();
+			_this.resultsClearOut();
+			_this.body.removeClass('noscroll');
+			_this.view.snapWrapper
+				.on('transitionend webkitTransitionEnd oTransitionEnd', function (event) {
+					_this.view.snapWrapper.removeClass('fadeOut');
+					_this.view.snapInput.val('');
+					_this.resetInputPlaceholder();
+					$(this).off(event);
+				});
+		} else {
+			_this.view.snapWrapper.removeClass('fadeOut');
+		}
+	},
+
+	/**
+	 * Add click events to display and hide search overlay
+	 *
+	 */
+	initShowOverlayButton: function () {
+		var _this = this;
+
+		if(_this.moduleElement.find('.series_specific').length > 0){
+			if ((this.feed && !this.feed.seriesTrendingResults)|| (this.feed && this.feed.seriesTrendingResults.length== 0)) {
+				_this.view.snapSearch.css('display','none');
+			}
+		}
+
+		/* Display Search Overlay */
+		this.body
+			.off('click.snap_open')
+			.on('click.snap_open', '.site_header .search_wrapper, .js_header .search_wrapper, .js-trigger-search', function (event) {
+				_this.fireTrackingOverlayOpen(_this);
+				_this.view.snapWrapper.addClass('open');
+				_this.body.addClass('noscroll');
+				_this.pageContents.addClass('search-open');
+
+				if (_this.feed.showId && (_this.feed && _this.feed.seriesTrendingResults) && (_this.feed && _this.feed.seriesTrendingResults.length > 0)) {
+
+					$(".s_layouts_whole_site").removeClass("highlight");
+					$(".s_layouts_this_show").addClass("highlight");
+
+					_this.searchSeriesFeedParams = _this.searchFeedParams + '&fq=parentId_s_mv:' + _this.feed.showId;
+					_this.searchSeries = true;
+
+				}
+				_this.resultsClearOut();
+				_this.initTrendingView();
+				_this.pauseVideoPlayers(true);
+				event.preventDefault();
+				_this.view.snapInput.focus();
+
+			});
+
+
+
+		/* Hide Search Overlay */
+		this.view.snapCloseBtn
+			.off('click.snap_close')
+			.on('click.snap_close', function(event){
+				_this.pauseVideoPlayers(false);
+				_this.closeOverlay();
+			});
+},
+
+	/**
+	 * Add event on scroll to set focus on snap wrapper div
+	 *  for scrolling search overlay
+	 *
+	 */
+	initScrollSetFocus: function () {
+		var _this = this;
+
+		/* Element must have a tabindex value before it can receive focus */
+		this.view.snapWrapper
+			.off('scroll.snap_scroll')
+			.on('scroll.snap_scroll', function () {
+				_this.view.snapWrapper.attr("tabindex",-1).focus();
+			});
+	},
+
+	/**
+	 * Trigger Image Broker on Scroll;
+	 *
+	 */
+	initScrollTriggerBroker: function () {
+		var _this = this;
+
+		this.view.snapWrapper
+			.off('scroll.snap_scrollbroker')
+			.on('scroll.snap_scrollbroker', function () {
+				_this.triggerImageBroker();
+			});
+	},
+
+	/**
+	 * Initialize Trending View
+	 *
+	 */
+	initTrendingView: function () {
+		var _this = this;
+		this.view.snapWrapper.off('scroll.snap_loadMore'); //don't load more on scrolling
+		this.moduleElement.find('.s_layouts_snapItemLink').off('click.searchClickThrough'); // clear event listener on click throughs
+
+
+		if(!_this.searchSeries){
+
+			if (this.feed && this.feed.trendingResults && this.feed.trendingResults.length > 0) {
+				this.view.generateTrendingView();
+				this.sortSearchResults(this.feed.trendingResults);
+			} else {
+				//console.log('no trending results available');
+			}
+		}else{
+
+			if (this.feed && this.feed.seriesTrendingResults && this.feed.seriesTrendingResults.length > 0) {
+				this.view.generateTrendingView();
+				this.sortSearchResults(this.feed.seriesTrendingResults);
+			} else {
+				//console.log('no trending results available');
+			}
+
+		}
+
+		//click tracking
+		this.moduleElement.find('.s_layouts_snapItemLink').on('click.searchClickThrough', function(evt){
+			_this.moduleClickTracking(_this, this);
+		});
+	},
+
+	resetInputPlaceholder: function(){
+		var _this = this;
+		_this.view.snapInput.attr('placeholder',_this.view.data.placeHolderText);
+	},
+
+	/**
+	 * Register keyboard event listeners for some key shortcuts
+	 *
+	 */
+	initKeyControls: function() {
+		var _this = this;
+
+		$(document).on('keyup', function(e) {
+			if(e.which == 27) {
+				_this.closeOverlay();
+			}
+		});
+	},
+
+	/**
+	 * On keyup event start searching
+	 *
+	 */
+	initKeyEvent: function () {
+		var _this = this,
+			keyStroke;
+
+		this.view.snapInput
+			.on('keyup', function(e) {
+				keyStroke = String.fromCharCode(e.which); // run search only on valid characters
+
+				if (this.isMobile) {
+					if (e.which == 13) {
+						_this.preventReturnBtnClick(e);
+					}
+				}
+				if (e.which == 37 || e.which == 38 || e.which == 39 || e.which == 40){ // if arrow keys
+					return false;
+				}
+				if ((!_this.alphanumericAndSymbols.test(keyStroke)) || e.which == 8) {
+
+					_this.requestNumber++;
+
+					_this.fadeOutResults();
+					_this.resultsClearOut();
+
+					_this.playLoadingAnim('loadingFirstPage');
+					if (_this.view.snapInput.val().trim().length) {
+						_this.delayProcessSearch(false);
+					} else {
+						clearTimeout(_this.ajaxRequestTimer);
+						_this.ajaxRequestTimer = setTimeout(function () {
+							_this.initTrendingView();
+						}, _this.ajaxRequestDelay);
+					}
+
+					$(this).off(event);
+
+				}
+
+
+			});
+
+		this.view.snapInput.on('keypress keydown', function(e){
+			if (this.isMobile) {
+				if (e.which == 13) {
+					_this.preventReturnBtnClick(e);
+				}
+			}
+
+			$(this).off(event);
+		});
+	},
+
+	/**
+	 * Prevent submit on return/go on mobile/tablet devices
+	 *
+	 */
+	preventReturnBtnClick : function(event) {
+		event.preventDefault();
+		this.moduleElement.find('.s_layouts_snapInput').blur();
+	},
+
+
+	/**
+	 * A delay to process the search request
+	 *
+	 */
+	delayProcessSearch : function(filteredSearch) {
+		var _this = this;
+		_this.snapSearchTerm = _this.view.snapInput.val().trim();
+		clearTimeout (_this.ajaxRequestTimer);
+		_this.ajaxRequestTimer = setTimeout(function(){
+			_this.resultsClearOut(filteredSearch);
+			_this.initScrollLoadMore();
+			_this.createSolrUrl();
+		}, _this.ajaxRequestDelay);
+	},
+
+	/**
+	 *  Add event on scroll to load more results
+	 *
+	 */
+	initScrollLoadMore: function () {
+		var _this = this,
+			timeoutId = null;
+
+		this.view.snapWrapper
+			.off('scroll.snap_loadMore')
+			.on('scroll.snap_loadMore', function () {
+				if ((_this.itemsRenderedCount !== _this.maxCount) && (_this.itemsRenderedCount < _this.totalResults) && (!_this.moduleElement.hasClass('loadingFirstPage')) && _this.checkScrolledPosition()) {
+					if (timeoutId !== null) {
+						clearTimeout(timeoutId);
+					}
+					timeoutId = setTimeout(function () {
+						timeoutId = null;
+						_this.onScrollSearch();
+					}, 20);
+				}
+			});
+	},
+
+	/**
+	 * Play search animations
+	 *
+	 */
+	playLoadingAnim: function(className) {
+		if (this.moduleElement.hasClass(className)) {
+			this.moduleElement.removeClass(className);
+		}
+		this.moduleElement.addClass(className);
+	},
+
+	/**
+	 * Check if data loading is in progress
+	 *
+	 */
+	onScrollSearch: function() {
+		this.getNextResults();
+		this.playLoadingAnim('loadingNextPage');
+	},
+
+	/**
+	 * Increment page number
+	 *
+	 */
+	getNextResults: function() {
+		++this.pageNumber;
+		this.requestNumber++;
+		this.createSolrUrl();
+	},
+	/**
+	 * Checking for Season Number and Episode Number , Number is 2 digit here.
+	 * Getting rid of those in the search string
+	 */
+	parseQuery:function (query) {
+	var seasonEpisodeRegexp = /((season|episode)[\s]?(\d+))/ig,
+		finalTerm = query,
+		seasonNumber,
+		episodeNumber,
+		matches;
+
+	while (matches = seasonEpisodeRegexp.exec(query)) {
+		finalTerm = finalTerm.replace(matches[1], '');
+		switch (matches[2]) {
+			case 'season':
+				seasonNumber = matches[3];
+				break;
+			case 'episode':
+				episodeNumber = matches[3];
+				break;
+		}
+	}
+
+	return {
+		term: finalTerm.trim(),
+		seasonNumber: seasonNumber,
+		episodeNumber: episodeNumber
+	};
+},
+
+	/**
+	 * Create SOLR Feed URL
+	 *
+	 */
+	createSolrUrl: function() {
+		var rows = this.rowsPerPage,
+			start = this.pageNumber * rows,
+			filter = '',
+			solrUrl,
+			additionalParams,
+			searchTerm;
+
+		// Check for filtered term
+		if (typeof this.filterTerm === 'string') {
+			if (this.filterTerm !== 'All') {
+				filter = '&fq=bucketName_s:' + this.filterTerm;
+			}
+		}
+
+		additionalParams = (filter !== '') ? filter : this.facetedResultsParams;
+		searchTerm = (!this.alphanumericAndSymbols.test(this.snapSearchTerm)) ? this.snapSearchTerm : this.snapSearchTerm.replace(this.alphanumericAndSymbols,'');
+
+		var searchParseValues = this.parseQuery(searchTerm);
+
+		if(this.searchSeries == true){
+
+			solrUrl = this.searchFeedURL + encodeURIComponent(searchParseValues.term) + this.searchSeriesFeedParams + '&rows=' + rows + '&start=' + start + additionalParams;
+
+			if(searchParseValues.seasonNumber && searchParseValues.episodeNumber) {
+				solrUrl = solrUrl + '&fq=seasonNumber_s:'+searchParseValues.seasonNumber + '&fq=episodeNumber_s:'+searchParseValues.episodeNumber;
+			}else if(searchParseValues.seasonNumber) {
+				solrUrl = solrUrl + '&fq=seasonNumber_s:'+searchParseValues.seasonNumber;
+			}else if(searchParseValues.episodeNumber) {
+				solrUrl = solrUrl + '&fq=episodeNumber_s:' + searchParseValues.episodeNumber;
+			}
+
+		}else if(!this.searchSeries){
+
+			solrUrl = this.searchFeedURL + encodeURIComponent(searchParseValues.term) + this.searchFeedParams + '&rows=' + rows + '&start=' + start + additionalParams;
+
+			if(searchParseValues.seasonNumber && searchParseValues.episodeNumber) {
+				solrUrl = solrUrl + '&fq=seasonNumber_s:'+searchParseValues.seasonNumber + '&fq=episodeNumber_s:'+searchParseValues.episodeNumber;
+			}else if(searchParseValues.seasonNumber) {
+				solrUrl = solrUrl + '&fq=seasonNumber_s:'+searchParseValues.seasonNumber;
+			}else if(searchParseValues.episodeNumber) {
+				solrUrl = solrUrl + '&fq=episodeNumber_s:'+searchParseValues.episodeNumber;
+			}
+		}
+
+		this.processSearch(solrUrl);
+	},
+
+	/**
+	 * Get an available callback name suffix to make the callback names unique
+	 *
+	 */
+	getAvailCallbackName: function(){
+		var suffix = 0,
+			lastIdx = 0,
+			arrCallbackSuffix = this.arrCallbackSuffix;
+		for (var i=0; i < arrCallbackSuffix.length; i++) { // check for an available callback name and return it
+			//console.log(arrCallbackSuffix[i].available)
+			if (arrCallbackSuffix[i].available === true) {
+				arrCallbackSuffix[i].available = false;
+				suffix = arrCallbackSuffix[i].idx;
+			} //console.log(suffix);
+			lastIdx = arrCallbackSuffix[i].idx;
+		}
+		if (suffix === 0) { // if no available callback names, add one
+			suffix = ++lastIdx;
+			arrCallbackSuffix.push({
+				'idx':suffix,
+				'available': false
+			});
+		}
+		return this.callbackPrefix + suffix;
+	},
+
+	/**
+	 * Reset one callback name to be available for use again
+	 *
+	 */
+	resetCallbackName: function(callbackName){
+		var callbackSuffix = 0,
+			arrCallbackSuffix = this.arrCallbackSuffix,
+			callbackPrefix = this.callbackPrefix;
+		// get the callback suffix to match what's in the array later
+		callbackSuffix = parseInt(callbackName.substring(callbackPrefix.length, callbackName.length));
+
+		for (var i=0; i < arrCallbackSuffix.length; i++) { // set available to true if a match
+			if (arrCallbackSuffix[i].idx === callbackSuffix) {
+				arrCallbackSuffix[i].available = true;
+			}
+		}
+	},
+
+	/**
+	 * Get SOLR feed results for search term
+	 *
+	 */
+	processSearch: function(url) {
+		var _this = this;
+		var callbackName = _this.getAvailCallbackName(),
+			requestNumber = _this.requestNumber;
+
+		$.ajax({"jsonp":"json.wrf", "jsonpCallback":callbackName, "dataType":"jsonp", "url":url, callbackName:callbackName, requestNumber: requestNumber})
+			.done(function(data, textStatus, jqXHR){
+				_this.resetCallbackName(this.callbackName);
+				if (_this.requestNumber !== this.requestNumber){ return false; } // if this request number is not matching the latest, stop
+				_this.getResultFromSolr(data);
+
+			})
+			.fail(function(jqXHR, textStatus, errorThrown){
+				_this.fadeOutResults();
+				_this.resultsClearOut();
+				_this.resetCallbackName(this.callbackName);
+				//console.log(errorThrown);
+			});
+	},
+
+	/**
+	 * Get documents from response
+	 *
+	 */
+	getResultFromSolr: function(results) {
+		if (results.response && results.response.docs && results.response.docs.length > 0) {
+			this.sortSearchResults(results.response.docs);
+			this.totalResults = results.response.numFound;
+
+			if (results.facet_counts && results.facet_counts.facet_fields && results.facet_counts.facet_fields.bucketName_s && results.facet_counts.facet_fields.bucketName_s.length > -1 && !this.tabsFilter) {
+				this.generateTabInfo(results.facet_counts.facet_fields.bucketName_s);
+			}
+		} else {
+			this.moduleElement.removeClass('loadingFirstPage loadingNextPage');
+
+			if (this.itemsRenderedCount == 0) {
+				this.fadeOutResults();
+				this.resultsClearOut();
+				this.view.generateMessage();
+				this.initTrendingView();
+			}
+		}
+
+		this.moduleElement.find('.s_layouts_snapItemLink').off('click.searchClickThrough'); // clear event listener on click throughs
+
+		//setup click tracking
+		var _this = this;
+		this.moduleElement.find('.s_layouts_snapItemLink').on('click.searchClickThrough', function(evt){
+			_this.moduleClickTracking(_this, this);
+		});
+	},
+
+	/**
+	 * Add document to correct column based on order number
+	 *
+	 */
+	sortSearchResults: function(docs) {
+		var _this = this,
+			currentNum = _this.currentItemNum;
+
+		this.moduleElement.removeClass('loadingFirstPage').removeClass('loadingNextPage');
+
+		for (var i = 0, len = docs.length; i < len; i++) {
+			currentNum = currentNum+1;
+			if (_this.view.snapWrapper.hasClass(_this.view.breakPointTwo.className)) {
+				if ((currentNum) % 2 == 0) {
+					//even
+					if ((currentNum) % 4 == 0 ) {
+						_this.view.generateResultsItem(docs[i], _this.view.snapColumnFour, this.itemsRenderedCount);
+					} else {
+						_this.view.generateResultsItem(docs[i], _this.view.snapColumnTwo, this.itemsRenderedCount);
+					}
+				} else {
+					//odd
+					if ((currentNum) % 4 == 3) {
+						_this.view.generateResultsItem(docs[i], _this.view.snapColumnThree, this.itemsRenderedCount);
+					} else {
+						_this.view.generateResultsItem(docs[i], _this.view.snapColumnOne, this.itemsRenderedCount);
+					}
+				}
+			} else if (_this.view.snapWrapper.hasClass(_this.view.breakPointOne.className)) {
+				if ((currentNum) % 3 == 0) {
+					_this.view.generateResultsItem(docs[i], _this.view.snapColumnThree, this.itemsRenderedCount);
+				} else if ((currentNum) % 3 == 1) {
+					_this.view.generateResultsItem(docs[i], _this.view.snapColumnOne, this.itemsRenderedCount);
+				} else if ((currentNum) % 3 == 2) {
+					_this.view.generateResultsItem(docs[i], _this.view.snapColumnTwo, this.itemsRenderedCount);
+				}
+			} else {
+				_this.view.generateResultsItem(docs[i], _this.view.snapColumnOne, this.itemsRenderedCount);
+			}
+
+			this.checkTotalRendered();
+		}
+
+		_this.currentItemNum = currentNum;
+
+		this.addTransition();
+
+		if (this.pageNumber == 0 && (this.itemsRenderedCount == this.rowsPerPage)) {
+			this.checkContentHeight();
+		}
+	},
+
+	/**
+	 * Fade out results
+	 *
+	 */
+	fadeOutResults: function() {
+		if (this.tabsFilter) {
+			if (this.moduleElement.find('.s_layouts_snapResults .s_animation_animate').hasClass('s_animation_animate_fadein')) {
+				this.moduleElement.find('.s_layouts_snapResults .s_animation_animate')
+					.removeClass('s_animation_animate_fadein');
+			}
+		} else {
+			if (this.moduleElement.find('.s_animation_animate').hasClass('s_animation_animate_fadein')) {
+				this.moduleElement.find('.s_animation_animate')
+					.removeClass('s_animation_animate_fadein');
+			}
+		}
+	},
+
+	/**
+	 * Clear items from column & tabs
+	 *
+	 */
+	resultsClearOut: function(filteredSearch) {
+		this.view.snapResults.find('.s_layouts_snapColumn').empty();
+		if (this.moduleElement.find('.s_layouts_snapHeader')) {
+			this.moduleElement.find('.s_layouts_snapHeader').remove();
+		}
+
+		if (this.moduleElement.find('.s_layouts_snapMessage')) {
+			this.moduleElement.find('.s_layouts_snapMessage').remove();
+		}
+
+		this.itemsRenderedCount = 0;
+		this.currentItemNum = 0;
+		this.pageNumber = 0;
+		this.totalResults = null;
+
+		if (!filteredSearch) {
+			this.filterTerm = null;
+			this.view.snapTabs.empty();
+			this.tabsFilter = false;
+		}
+
+		this.playLoadingAnim('loadingFirstPage');
+	},
+
+	/**
+	 * Increment total number of items rendered
+	 *
+	 */
+	checkTotalRendered: function() {
+		++this.itemsRenderedCount;
+	},
+
+	/**
+	 * Check if scroll has reached div bottom
+	 *
+	 */
+	checkScrolledPosition: function() {
+		var scrolled = this.view.snapWrapper.scrollTop(), //how much has been scrolled
+			snapWrapperHeight = Math.floor(this.view.snapWrapper[0].getBoundingClientRect().height), // inner height of the element
+			snapContainerHeight = Math.floor(this.view.snapContainer[0].getBoundingClientRect().height); //inner height of the content of the element
+
+		return scrolled + snapWrapperHeight >= snapContainerHeight;
+	},
+
+	/**
+	 * On page one of results, check to see if content is less that div height.
+	 *  If less, get next page of results
+	 *
+	 */
+	checkContentHeight: function() {
+		var snapWrapperHeight = this.view.snapWrapper.innerHeight(), // inner height of the element
+			snapContainerHeight = this.view.snapContainer.innerHeight(); //inner height of the content of the element
+
+		if (snapWrapperHeight >= snapContainerHeight) {
+			this.getNextResults();
+		}
+	},
+
+	/**
+	 * Generate Tabs
+	 *
+	 */
+	generateTabInfo: function(bucketNames) {
+		var _this = this,
+			tabsList = this.feed.tabs;
+		this.view.snapTabs.empty();
+
+		if (tabsList && tabsList.length > 0) {
+
+			tabsList.forEach(function(value) {
+				if (value.bucket == 'All') {
+					_this.view.generateTabItems(value.label, value.bucket, true);
+				} else {
+					if (bucketNames.indexOf(value.bucket) > -1) {
+						_this.view.generateTabItems(value.label, value.bucket);
+					}
+				}
+			});
+			this.addTabClickEvent();
+		}
+	},
+
+	/**
+	 * Add click event for tabs
+	 *
+	 */
+	addTabClickEvent: function() {
+		var _this = this,
+			$tab,
+			timer;
+
+		_this.tabsFilter = false;
+
+		this.moduleElement.find('.s_layouts_snapTab').on('click', function() {
+			$tab = $(this);
+
+			_this.fireTrackingTabs(_this, $tab.attr('data-filter'));
+
+			_this.requestNumber++;
+
+			window.clearTimeout(timer);
+			timer = window.setTimeout(function(){_this.fadeOutResults(); }, 20);
+
+			_this.moduleElement.find('.s_layouts_snapResults .s_animation_animate').on('transitionend webkitTransitionEnd oTransitionEnd', function(event){
+				_this.tabsFilter = true;
+
+				if (!$(this).hasClass('s_animation_animate_fadein')) {
+					//_this.resultsClearOut(tabsFilter);
+					_this.view.snapTabs.find('.active').removeClass('active');
+					$tab.addClass('active');
+					_this.setFilterTerm($tab.attr('data-filter'));
+					_this.delayProcessSearch(_this.tabsFilter);
+					$(this).off(event);
+				}
+			});
+		});
+	},
+
+	/**
+	 * Set Filter Term
+	 *
+	 */
+	setFilterTerm: function(value) {
+		this.filterTerm = value;
+	},
+
+	/**
+	 * Add fade in transition
+	 *
+	 */
+	addTransition: function() {
+		var _this = this,
+			delayTransition;
+
+		clearTimeout (delayTransition);
+		delayTransition = setTimeout(function () {
+			if (_this.tabsFilter) {
+				_this.moduleElement.find('.s_layouts_snapTab.s_animation_animate').removeClass('s_animation_animate');
+				_this.moduleElement.find('.s_layouts_snapResults .s_animation_animate').addClass('s_animation_animate_fadein');
+			} else {
+				_this.moduleElement.find('.s_animation_animate').addClass('s_animation_animate_fadein');
+				_this.moduleElement.find('.s_animation_animate').on('transitionend webkitTransitionEnd oTransitionEnd', function(event){
+					_this.moduleElement.find('.s_layouts_snapTab.s_animation_animate').removeClass('s_animation_animate s_animation_animate_fadein');
+					$(this).off(event);
+				});
+			}
+			_this.triggerImageBroker();
+		}, 1);
+	},
+
+	/**
+	 * Trigger image broker
+	 *
+	 */
+	triggerImageBroker: function() {
+		window.Triforce.getMediator().trigger('triforce:pageintouch');
+	}
+
+});
+/*
+ @name: ENT_M171 - Global Search
+ @functional: https://confluence.mtvi.com/display/ENT/ENT_M171+-+Global+Search
+ @styleguide: http://confluence.mtvi.com/display/ENT/Javascript+Style+Guide
+ @author: $Author: msawant $
+ */
+
+$Crabapple.TriforceView_ent_m171_V2_0_2 = {
+	parentView: '$Crabapple.TriforceView',
+	extention: {
+		coreElement: null,
+		defaultQuality: 0.75,
+		viewPortWidth: $(window).width(),
+		breakPointOne: {
+			'width': 603,
+			'className':'s_layouts_three_column'
+		},
+		breakPointTwo: {
+			'width':768,
+			'className':'s_layouts_four_column'
+		},
+		breakPointMobile: {
+			'width': 602,
+			'className':'s_layouts_one_column'
+		},
+		placeholderActiveIE: true,
+
+		/**
+		 * Generates core element
+		 */
+		generateCoreElement: function() {
+			this.coreElement = this.moduleElement;
+			this.coreElement.addClass('ent_m171');
+		},
+
+		/**
+		 * Renders core element
+		 */
+		render: function (data) {
+			this.data = data;
+			this.snapWrapper = this.appendDom(this.coreElement, 'div', {'class': 's_layouts_snapWrapper'});
+			this.snapContainer = this.appendDom(this.snapWrapper, 'div', {'class': 's_layouts_snap'});
+			this.generateModuleComponents();
+		},
+
+		/**
+		 * Sets output(core element) to the page
+		 */
+		setOutput: function () {
+			this.moduleElement = this.replaceModuleElement(this.moduleElement, this.coreElement);
+			return this.moduleElement.show();
+		},
+
+		/**
+		 * Generate Module Components
+		 */
+		generateModuleComponents: function () {
+			if (this.data.showId) {
+				this.snapInputWrapper = this.appendDom(this.snapContainer, 'div', {'class': 's_layouts_snapInputWrapper series_specific'});
+			} else {
+				this.snapInputWrapper = this.appendDom(this.snapContainer, 'div', {'class': 's_layouts_snapInputWrapper'});
+			}
+			this.snapTabsWrapper = this.appendDom(this.snapContainer, 'div', {'class': 's_layouts_snapHeaderWrapper'});
+			this.snapResultsWrapper = this.appendDom(this.snapContainer, 'div', {'class': 's_layouts_snapResultsWrapper'});
+
+			this.generateForm();
+			this.generateTabsNav();
+			this.placeholderFix();
+		},
+
+		/**
+		 * Create form
+		 *
+		 */
+		generateForm: function () {
+			if (this.data.showId) {
+				this.snapInput = this.appendDom(this.snapInputWrapper, 'input', {'type': 'text','class': 's_layouts_snapInput', 'autocomplete': 'off', 'autocorrect':'off', 'autocapitalize':'off', 'spellcheck':'false', 'placeholder': this.data.placeHolderText});
+				this.snapSearch = this.appendDom(this.snapInputWrapper, 'div', {'class': 's_layouts_snapSearchWrapper'});
+				this.appendDom(this.snapSearch, 'span', {'class': 's_layouts_this_show highlight'}).html('THIS SHOW');
+				this.appendDom(this.snapSearch, 'span', {'class': 's_layouts_whole_site '}).html('WHOLE SITE');
+			} else {
+				this.snapInput = this.appendDom(this.snapInputWrapper, 'input', {'type': 'text', 'class': 's_layouts_snapInput', 'autocomplete': 'off', 'autocorrect':'off', 'autocapitalize':'off', 'spellcheck':'false', 'placeholder': this.data.placeHolderText});
+			}
+
+			this.appendDom(this.snapInputWrapper, 'input', {'type': 'submit', 'class': 's_layouts_snapSubmit'});
+			this.snapCloseBtn = this.appendDom(this.snapInputWrapper, 'div', {'class': 's_layouts_snapClose'});
+			this.appendDom(this.snapCloseBtn, 'span', {'class': 'screen-reader-text'}).html('close');
+		},
+
+
+		/**
+		 * Create tabs wrapper
+		 *
+		 */
+		generateTabsNav: function () {
+			this.snapTabs = this.appendDom(this.snapTabsWrapper, 'div', {'class': 's_layouts_snapTabs'});
+		},
+
+		/**
+		 * Code to fix placeholder for IE browsers
+		 *
+		 */
+		placeholderFix: function () {
+			var _this = this,
+				resetPlaceholder = function(){
+					_this.snapInput.val(_this.defaultPlaceholderText);
+					//move cursor to first position
+					if (_this.snapInput[0].setSelectionRange) {
+						_this.snapInput[0].setSelectionRange(0, 0);
+					} else if (_this.snapInput[0].createTextRange) {
+						var range = _this.snapInput[0].createTextRange();
+						range.collapse(true);
+						range.moveEnd('character', 0);
+						range.moveStart('character', 0);
+						range.select();
+					}
+					_this.snapInput.addClass('snap-input-placeholder');
+					_this.placeholderActiveIE = true;
+				},
+				checkInputValue = function(){
+					if (_this.snapInput.val() === _this.defaultPlaceholderText || _this.snapInput.val() === ''){
+						resetPlaceholder();
+					}
+				},
+				clearInputPlaceholder = function(e){
+					// if not arrow keys or input is not already updated
+					if ( _this.snapInput.val() === _this.defaultPlaceholderText &&
+							e.keyCode !== 37 &&
+							e.keyCode !== 38 &&
+							e.keyCode !== 39 &&
+							e.keyCode !== 40
+						){
+						e.preventDefault();
+						_this.snapInput.val('');
+						_this.snapInput.val(String.fromCharCode(e.keyCode));
+						_this.snapInput.removeClass('snap-input-placeholder');
+						_this.placeholderActiveIE = false;
+					} else if ( (_this.snapInput.val() === _this.defaultPlaceholderText || _this.snapInput.val() === '') && (
+								e.keyCode === 37 ||
+								e.keyCode === 38 ||
+								e.keyCode === 39 ||
+								e.keyCode === 40
+							)
+						){
+						e.preventDefault();
+						resetPlaceholder();
+					} else { // else enter character
+						_this.snapInput.removeClass('snap-input-placeholder');
+						_this.placeholderActiveIE = false;
+					}
+				};
+			// if older <= IE11 and not IE12(Edge)
+			if ((navigator.userAgent.indexOf("MSIE") > -1 || (!(window.ActiveXObject) && "ActiveXObject" in window))
+				&&
+				/x64|x32/ig.test(window.navigator.userAgent) === false){
+					this.defaultPlaceholderText = this.snapInput.attr('placeholder');
+					this.snapInput.addClass('snap-input-placeholder');
+					this.snapInput.on('blur focus click', checkInputValue);
+					this.snapInput.on('keypress', clearInputPlaceholder);
+			}
+		},
+
+		/**
+		 * Create Messaging
+		 *
+		 */
+		generateMessage: function () {
+			this.appendDom(this.snapTabsWrapper, 'div', {'class': 's_layouts_snapMessage'}).html(this.data.failedResultText);
+		},
+
+		/**
+		 * Create columns with breakpoints
+		 *
+		 */
+		generateColumns: function () {
+			this.snapResults = this.appendDom(this.snapResultsWrapper, 'ul', {'class': 's_layouts_snapResults'});
+			if (this.viewPortWidth <= this.breakPointOne.width) {
+				this.snapWrapper.addClass(this.breakPointMobile.className);
+				//this.snapInput.attr('placeholder','Search');
+			} else if (this.viewPortWidth <= this.breakPointTwo.width && this.viewPortWidth > this.breakPointOne.width) {
+				this.snapWrapper.addClass(this.breakPointOne.className);
+				//this.snapInput.attr('placeholder','Search');
+			} else if (this.viewPortWidth > this.breakPointTwo.width) {
+				this.snapWrapper.addClass(this.breakPointTwo.className);
+			}
+			this.snapColumnOne = this.appendDom(this.snapResults, 'div', {'class': 's_layouts_snapColumn one'});
+			this.snapColumnTwo = this.appendDom(this.snapResults, 'div', {'class': 's_layouts_snapColumn two'});
+			this.snapColumnThree = this.appendDom(this.snapResults, 'div', {'class': 's_layouts_snapColumn three'});
+			this.snapColumnFour = this.appendDom(this.snapResults, 'div', {'class': 's_layouts_snapColumn four'});
+
+		},
+
+		/**
+		 * Generate Trending View
+		 *
+		 */
+		generateTrendingView: function () {
+			this.appendDom(this.snapTabsWrapper, 'div', {'class': 's_layouts_snapHeader s_animation_animate s_trending_snapHeader'}).html(this.data.header);
+		},
+
+		/**
+		 * Create item
+		 *
+		 */
+		generateResultsItem : function(item, column, num) {
+			var animate = (num < 32) ? ' s_animation_animate ' : '',
+				_seasonEpisode = '',
+				link = this.appendDom(column, 'a', {
+					'href': item.url_s,
+					'class': 's_layouts_snapItem s_layouts_snapItemLink s_animation_animate' + animate,
+					'data-content-type': item.contentType_s
+				}),
+				tveLock = this.appendDom(link, 'div', {'class': 'tve_lock'}),
+				imageWrapper = this.appendDom(link, 'div', {'class': 's_layouts_snapImageWrapper'}),
+				detail = this.appendDom(link, 'div', {'class': 's_layouts_snapItemDetails'}),
+				detailContainer = this.appendDom(detail, 'div', {'class': 's_layouts_snapItemDetailsContainer'}),
+				bucketClassName = ' s_layouts_snapItem' + item.bucketName_s;
+
+			link.addClass(bucketClassName);
+
+			if (item.isTveAuthRequiredForDesktop_b){
+				tveLockDesktop = this.appendDom(tveLock, 'span', {'class': 'tve_lock_desktop'});
+			}
+			if (item.isTveAuthRequiredForMobile_b){
+				tveLockMobile = this.appendDom(tveLock, 'span', {'class': 'tve_lock_mobile'});
+			}
+
+			if (item.imageUrl_s && item.imageUrl_s !== '') {
+				this.appendImage(imageWrapper, {
+					'url': item.imageUrl_s,
+					"height": item.imageHeight_i,
+					"width": item.imageWidth_i
+				});
+			} else { // image not present, add a color background
+				this.appendDom(imageWrapper, 'div', {'class': 'image_holder'});
+				imageWrapper.addClass('no_image');
+			}
+
+			this.appendDom(link, 'div', {'class': 'testing_order'}).html(num); //used for testing the list order
+
+			if (item.title_t && item.title_t !== '') {
+				this.appendDom(detailContainer, 'span', {'class': 's_layouts_snapItemTitle'}).html(item.title_t);
+			}
+
+			if (item.labelName_s && item.labelName_s !== '') {
+				this.appendDom(imageWrapper, 'div', {'class': 's_layouts_snapBadge'}).html(item.labelName_s);
+			}
+
+			if (item.duration_s && item.duration_s !== '') {
+				this.appendDom(imageWrapper, 'span', {'class': 's_layouts_snapItemDuration'}).html(item.duration_s);
+			}
+
+			if (item.parentTitle_t && item.parentTitle_t !== '') {
+				this.appendDom(detailContainer, 'span', {'class': 's_layouts_snapItemSubtitle'}).html(item.parentTitle_t);
+			}
+			if (item.contentType_s && item.contentType_s == 'Episode') {
+				if (item.seasonNumber_s){
+					_seasonEpisode = "SEASON " + item.seasonNumber_s;
+				}
+				if (item.seasonNumber_s && item.episodeNumber_s){
+					_seasonEpisode += ", EP " + item.episodeNumber_s;
+				}
+				if (_seasonEpisode != ""){
+					this.appendDom(detailContainer, 'span', {'class': 's_layouts_snapItemMetaTitle'}).html(_seasonEpisode);
+				}
+			}
+
+			if (item.bucketName_s && item.bucketName_s !== '' && item.bucketName_s == 'Articles') {
+				if (item.contentDate_dt && item.contentDate_dt !== '') {
+					var date, contentDate;
+
+					date = new Date(item.contentDate_dt);
+					contentDate = (date.getMonth() + 1) + '/' + date.getDate() + '/' + date.getFullYear();
+
+					this.appendDom(detailContainer, 'span', {'class': 's_layouts_snapItemSubtitle'}).html(contentDate);
+				}
+			}
+		},
+
+		/**
+		 * Create Bucket Tabs
+		 *
+		 */
+		generateTabItems: function (name, type, active) {
+			var activeValue = (active) ? ' active' : '';
+			this.appendDom(this.snapTabs, 'span', {'class': 's_layouts_snapTab s_animation_animate' + activeValue, 'data-filter': type}).html(name);
+		}
+	}
+};

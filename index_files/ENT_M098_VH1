@@ -1,0 +1,147 @@
+
+/* 
+	@name: ENT_TFV300
+	@functional: http://confluence.mtvi.com/display/ENT/ENT_TFV300
+	@styleguide: http://confluence.mtvi.com/display/ENT/Javascript+Style+Guide
+	@author: $Author: fedarovs $
+*/
+
+$Crabapple.TriforceView_ent_tfv300_v1 = function() {};
+$Crabapple.extend($Crabapple.TriforceView, $Crabapple.TriforceView_ent_tfv300_v1, {
+	coreElement: null,
+
+	/**
+	 * Generates core element
+	 */
+	generateCoreElement: function(trackingClass) {
+		if (!trackingClass && this.options && this.options.trackingClass) {
+			trackingClass = this.options.trackingClass;
+		}
+
+		this.coreElement = this.getModuleWrapper(this.moduleElement, trackingClass);
+	},
+
+	/**
+	 * Enhances the view(in that case just sets coreElement)
+	 * @param coreElement
+	 */
+	enhance: function (coreElement) {
+		this.coreElement = coreElement;
+	},
+
+	/**
+	 * Sets output(core element) to the page
+	 * Depending on the 'mode' it replaces the module element with core element or just does 'append'.
+	 */
+	setOutput: function() {
+		if (this.mode !== 'append') {
+			this.moduleElement = this.replaceModuleElement(this.moduleElement, this.coreElement);
+		} else {
+			this.moduleElement.append(this.coreElement);
+		}
+
+		return this.moduleElement.show();
+	}
+});
+/*
+ @name: ENT_M098 - About The Show Promo
+ @functional: https://confluence.mtvi.com/display/ENT/ENT_M098+-+About+The+Show+Promo
+ @styleguide: http://confluence.mtvi.com/display/ENT/Javascript+Style+Guide
+ @author: $Author: fedarovs $
+ */
+
+
+$Crabapple.TriforceModule_ent_m098_V1_0_1 = function() {};
+$Crabapple.extend($Crabapple.TriforceModule, $Crabapple.TriforceModule_ent_m098_V1_0_1, {
+    viewName: '$Crabapple.TriforceView_ent_m098_V1_0_1',
+    allowHTML: false,
+
+    initializeView: function () {
+        var feed = this.feedResponse.result;
+
+        this.view.generateCoreElement();
+        this.view.render(feed.show,{
+            allowHTML:this.allowHTML
+        });
+        this.view.setOutput();
+    }
+});
+/*
+ @name: ENT_M098 - Text Container
+ @functional: https://confluence.mtvi.com/display/ENT/ENT_M098+-+Text+Container
+ @styleguide: http://confluence.mtvi.com/display/ENT/Javascript+Style+Guide
+ @author: $Author: fedarovs $
+ */
+
+
+$Crabapple.TriforceView_ent_m098_V1_0_1 = {
+    parentView: '$Crabapple.TriforceView_ent_tfv300_v1',
+    extention: {
+
+        render: function (data, options) {
+            this.options = options;
+            if(data.description &&
+                data.description !== "") {
+                this.generateHeadline(data.title);
+                this.generateInfo(data.description);
+            }
+        },
+
+        generateHeadline: function (headline) {
+            this.appendDom(this.coreElement, 'h2', {
+                'class': 'headline section-header-lg'
+            }).text(headline);
+        },
+
+        generateInfo: function (description) {
+            if(this.options.allowHTML){
+                this.appendDom(this.coreElement, 'div', {
+                    'class': 'info'
+                }).html(description);
+            }
+            else {
+                this.appendDom(this.coreElement, 'div', {
+                    'class': 'info'
+                }).text(description);
+            }
+        }
+    }
+};
+/*
+ @name: ENT_M098_SPIKE - About The Show Promo
+ @functional: https://confluence.mtvi.com/display/ENT/ENT_M098_SPIKE+-+About+The+Show+Promo
+ @styleguide: http://confluence.mtvi.com/display/ENT/Javascript+Style+Guide
+ @author: $Author: fedarovs $
+ */
+
+$Crabapple.TriforceModule_ent_m098_vh1_V1_0_1 = function() {};
+$Crabapple.extend($Crabapple.TriforceModule_ent_m098_V1_0_1, $Crabapple.TriforceModule_ent_m098_vh1_V1_0_1, {
+    allowHTML: true,
+
+    enhanceModule: function() {
+        this.addEvents();
+    },
+
+    applyCustomColor: function() {
+        var customColors = window.$MTV.triforce.colorPicker(),
+            moduleName = this.feedResponse.result.promotion.promoType.toLowerCase(),
+            shortId = "promo_" + this.feedResponse.result.promotion.id + "_" + this.feedResponse.result.show.id,
+            htmlString = "";
+
+        this.view.moduleElement.addClass(shortId);
+
+        if(customColors.primaryColor) htmlString  += "." + moduleName + "." + shortId + " .info a { color: " + customColors.primaryColor + "; }";
+
+        if (htmlString != "") {
+            this.view.moduleElement.addClass(shortId);
+            var styleElement = document.getElementById(moduleName + '_' + shortId +'_colorsPallete') || document.createElement('style');
+            styleElement.id = moduleName + '_' + shortId + '_colorsPallete';
+            styleElement.innerHTML = htmlString;
+            document.head.appendChild(styleElement);
+        }
+    },
+    addEvents: function() {
+        this.applyCustomColor();
+    }
+});
+
