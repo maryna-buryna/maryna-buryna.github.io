@@ -1,0 +1,110 @@
+
+/*file=/u/docroot/keepviacom.com/javascript/modules/pe_m958_keepviacom/V1_0_0/View.js */
+$Crabapple.TriforceView_pe_m958_keepviacom_v1_0_0 = function() {};
+
+$Crabapple.extend($Crabapple.TriforceView, $Crabapple.TriforceView_pe_m958_keepviacom_v1_0_0, {
+	coreElement: {},
+
+	generateCoreElement: function(module) {
+		this.coreElement = this.createDom('div', {'class':'module ' + module});
+	},
+
+	templateContent: function(module, feed) {
+		if ($.isEmptyObject(feed.content)) {
+			return;
+		}
+		this.coreElement.html(tmplEngine(module, feed.template, feed.content));
+	},
+
+	setOutput: function() {
+		this.moduleElement.replaceWith(this.coreElement);
+		this.moduleElement = this.coreElement;
+
+		return this.moduleElement;
+	}
+});
+
+/*endFile*/
+
+/*file=/u/docroot/keepviacom.com/javascript/modules/pe_m958_keepviacom/V1_0_0/Controller.js */
+$Crabapple.TriforceModule_pe_m958_keepviacom_v1_0_0 = function () {
+};
+
+$Crabapple.extend($Crabapple.TriforceModule, $Crabapple.TriforceModule_pe_m958_keepviacom_v1_0_0, {
+    viewName: '$Crabapple.TriforceView_pe_m958_keepviacom_v1_0_0',
+
+    initializeView: function () {
+        var feed = JSON.parse(this.feedResponse.content);
+
+        this.view.generateCoreElement('m958');
+        this.view.templateContent('m958', feed);
+        this.moduleElement = this.view.setOutput();
+
+        // Reload all modules to display provider site.
+        if (feed.content.impacted == 'Y' && $('body').hasClass('entry')) {
+            this.forceHide = true;
+            $('body').removeClass('entry');
+            Triforce.loadPage(window.location.href, {
+                eventFired: 'redirect'
+            });
+            return;
+        }
+    },
+
+    addEvents: function () {
+        $('.custom-select').selectBoxes({
+            maxHeight: 305,
+            liHeight: 39
+        });
+
+        // Set form submit evetn.
+        var form = this.moduleElement.find('form');
+        if (form && form.length) {
+            var self = this;
+            form.on('submit', function (event) {
+                event.preventDefault();
+				if(self.validateFields($(this))) {
+					$.getJSON(form.data('link') + '&' + $(this).serialize(), function (response) {
+						self.feedResponse = response;
+						self.initializeView();
+						self.addEvents();
+					});
+				}
+            });
+        }
+    },
+
+	validateFields: function ($form) {
+		var validateStatus = true,
+			$formControl, parentForm,
+			self = this;
+
+		$form.find('[data-required]').each(function(key, input){
+			$formControl = $(input).parent().find('span.active-option');
+
+			if($(input).attr('name') === 'zipCode' && !(self.validateZIP(input.value))) {
+				$(input).addClass('error');
+				$(input).parent().find('.error_zip').addClass('active');
+
+				validateStatus = false;
+			}
+			if($formControl && $formControl.hasClass('placeholder-text')) {
+				parentForm = $(input).parents().get(1);
+				$formControl.addClass('error');
+				$(parentForm).find('.error_provider').addClass('active');
+
+				validateStatus = false;
+			}
+		});
+
+		return validateStatus;
+	},
+
+	validateZIP: function (zip) {
+		var reg = /^([0-9]{5})$/;
+		return reg.test(zip);
+	}
+
+});
+
+/*endFile*/

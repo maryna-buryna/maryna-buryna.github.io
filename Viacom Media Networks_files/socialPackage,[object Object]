@@ -1,0 +1,86 @@
+
+/*file=/u/docroot/keepviacom.com/javascript/modules/social_module/social.js */
+$Crabapple.TriforceModule_social = function() {};
+
+$Crabapple.extend($Crabapple.TriforceModule, $Crabapple.TriforceModule_social, {
+	viewName: '$Crabapple.TriforceView_m001_v1',
+	loginFeed: 'http://' + window.location.hostname + '/modules/m062',
+
+	initializeView: function () {
+		var viewName = this.viewName.split('.'),
+			feed = JSON.parse(this.feedResponse.content),
+			self = this;
+
+        var providerInfo = feed.content.providerInfo,
+			widgetsInfo = feed.content.widgets;
+
+        $('a.twitter-share').attr('href', 'https://twitter.com/intent/tweet?text=' + providerInfo.tw_text);
+        $('a.facebook-share').attr('data-link', providerInfo.fb_link);
+
+		for (var i=0; i < widgetsInfo.length; i++) {
+			if (widgetsInfo[i].type == 'tips') {
+				$('#call_provider').html('Call ' + widgetsInfo[i].title + '<span class="phone">' + providerInfo.phone + '</span>');
+			}
+			if (widgetsInfo[i].type == 'contactus') {
+				$('#email_provider').html('Email ' + widgetsInfo[i].title);
+			}
+		}
+
+		this.view = new window[viewName[0]][viewName[1]]();
+
+		this.view.init(this.moduleElement);
+
+		self.view.generateCoreElement('social info_module');
+		self.view.templateContent('social', feed);
+		self.moduleElement = self.view.setOutput();
+
+		this.attachEvents();
+	},
+
+    attachEvents: function () {
+		this.setMaxHeight();
+		this.view.moduleElement.find('.overlay_links').on('click', function(e) {
+			e.preventDefault();
+
+			if($(e.target).is('a.phone')){
+				e.preventDefault();
+				return;
+			}
+
+			if ($(this).is( "a" )) {
+				$NickPress.Overlay.showOverlay($(this).attr('href'));
+			} else {
+				$NickPress.Overlay.showOverlay($(this).data('href'));
+			}
+		});
+    },
+	setMaxHeight: function() {
+		var maxHeight = 0;
+		this.view.moduleElement.find('span.overlay_links').each(function() {
+			var moduleHeight = 40 + 31 + $(this).find('.title').height() + $(this).find('.description').height();
+			if (moduleHeight > maxHeight) maxHeight = moduleHeight;
+		});
+
+		if (maxHeight) {
+			this.view.moduleElement.find('span.overlay_links').each(function() {
+				$(this).parent().height(maxHeight);
+			});
+		}
+
+		if ($('.social-block').length > 1) {
+			var socialHeight = 0;
+
+			$('.social-block').each(function() {
+				var h = $(this).outerHeight();
+
+				if (h > socialHeight) socialHeight = h;
+			});
+
+			if (socialHeight) {
+				$('.social-block').outerHeight(socialHeight);
+			}
+		}
+	}
+});
+
+/*endFile*/
